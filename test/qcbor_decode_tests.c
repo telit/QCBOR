@@ -118,21 +118,24 @@ static int32_t IntegerValuesParseTestInternal(QCBORDecodeContext *pDCtx)
 
    if((nCBORError = QCBORDecode_GetNext(pDCtx, &Item)))
       return (int32_t)nCBORError;
+   /*decimal constant is unsigned only in ISO C90, add explicit type in constant (long long)*/
    if(Item.uDataType != QCBOR_TYPE_INT64 ||
-      Item.val.int64 != -4294967295)
+      Item.val.int64 != -4294967295ll)
       return -1;
 
    if((nCBORError = QCBORDecode_GetNext(pDCtx, &Item)))
       return (int32_t)nCBORError;
+   /*decimal constant is unsigned only in ISO C90, add explicit type in contant (long long)*/
    if(Item.uDataType != QCBOR_TYPE_INT64 ||
-      Item.val.int64 != -4294967294)
+      Item.val.int64 != -4294967294ll)
       return -1;
 
 
    if((nCBORError = QCBORDecode_GetNext(pDCtx, &Item)))
       return (int32_t)nCBORError;
+   /*decimal constant is unsigned only in ISO C90, add explicit type in contant (long long)*/
    if(Item.uDataType != QCBOR_TYPE_INT64 ||
-      Item.val.int64 != -2147483648)
+      Item.val.int64 != -2147483648ll)
       return -1;
 
    if((nCBORError = QCBORDecode_GetNext(pDCtx, &Item)))
@@ -354,27 +357,31 @@ static int32_t IntegerValuesParseTestInternal(QCBORDecodeContext *pDCtx)
 
    if((   nCBORError = QCBORDecode_GetNext(pDCtx, &Item)))
       return (int32_t)nCBORError;
+   /*decimal constant is unsigned only in ISO C90, add explicit type in contant (long long)*/
    if(Item.uDataType != QCBOR_TYPE_INT64 ||
-      Item.val.int64 != 2147483648)
+      Item.val.int64 != 2147483648ll)
       return  -1;
 
    if((   nCBORError = QCBORDecode_GetNext(pDCtx, &Item)))
       return (int32_t)nCBORError;
+   /*decimal constant is unsigned only in ISO C90, add explicit type in contant (long long)*/
    if(Item.uDataType != QCBOR_TYPE_INT64 ||
-      Item.val.int64 != 2147483649)
+      Item.val.int64 != 2147483649ll)
       return  -1;
 
    if((   nCBORError = QCBORDecode_GetNext(pDCtx, &Item)))
       return (int32_t)nCBORError;
+   /*decimal constant is unsigned only in ISO C90, add explicit type in contant (long long)*/
    if(Item.uDataType != QCBOR_TYPE_INT64 ||
-      Item.val.int64 != 4294967294)
+      Item.val.int64 != 4294967294ll)
       return  -1;
 
 
    if((   nCBORError = QCBORDecode_GetNext(pDCtx, &Item)))
       return (int32_t)nCBORError;
+   /*decimal constant is unsigned only in ISO C90, add explicit type in contant (long long)*/
    if(Item.uDataType != QCBOR_TYPE_INT64 ||
-      Item.val.int64 != 4294967295)
+      Item.val.int64 != 4294967295ll)
       return  -1;
 
 
@@ -574,13 +581,15 @@ static int32_t ParseOrderedArray(const uint8_t *pEncoded,
    // First string
    if(QCBORDecode_GetNext(&DCtx, &Item) != 0 || Item.uDataType != QCBOR_TYPE_BYTE_STRING)
       goto Done;
-   *pBuf3 = Item.val.string.ptr;
+   /*explicit casting added*/
+   *pBuf3 = (const uint8_t *)Item.val.string.ptr;
    *pBuf3Len = Item.val.string.len;
 
    // Second string
    if(QCBORDecode_GetNext(&DCtx, &Item) != 0 || Item.uDataType != QCBOR_TYPE_BYTE_STRING)
       goto Done;
-   *pBuf4 = Item.val.string.ptr;
+   /*explicit casting added*/
+   *pBuf4 = (const uint8_t *)Item.val.string.ptr;
    *pBuf4Len = Item.val.string.len;
 
    nReturn = 0;
@@ -2837,7 +2846,8 @@ static UsefulBufC make_nested_indefinite_arrays(int n, UsefulBuf Storage)
 static int32_t parse_indeflen_nested(UsefulBufC Nested, int nNestLevel)
 {
    QCBORDecodeContext DC;
-   QCBORDecode_Init(&DC, Nested, 0);
+   /*explicit casting added*/
+   QCBORDecode_Init(&DC, Nested, (QCBORDecodeMode)0);
 
    int j;
    for(j = 0; j < nNestLevel; j++) {
@@ -3447,7 +3457,8 @@ int32_t MemPoolTest(void)
    // nothing can be done with it unless that is set up.
    QCBORDecodeContext DC;
    const uint8_t pMinimalCBOR[] = {0xa0}; // One empty map
-   QCBORDecode_Init(&DC, UsefulBuf_FROM_BYTE_ARRAY_LITERAL(pMinimalCBOR),0);
+   /*explicit casting added*/
+   QCBORDecode_Init(&DC, UsefulBuf_FROM_BYTE_ARRAY_LITERAL(pMinimalCBOR), (QCBORDecodeMode) 0);
 
    // Set up an memory pool of 100 bytes
    // Then fish into the internals of the decode context
@@ -3545,7 +3556,8 @@ int32_t SetUpAllocatorTest(void)
    // nothing can be done with it unless that is set up.
    QCBORDecodeContext DC;
    const uint8_t pMinimalCBOR[] = {0x62, 0x48, 0x69}; // "Hi"
-   QCBORDecode_Init(&DC, UsefulBuf_FROM_BYTE_ARRAY_LITERAL(pMinimalCBOR),0);
+   /*explicit casting added*/
+   QCBORDecode_Init(&DC, UsefulBuf_FROM_BYTE_ARRAY_LITERAL(pMinimalCBOR), (QCBORDecodeMode) 0);
 
    uint8_t pAllocatorBuffer[50];
 

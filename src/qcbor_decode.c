@@ -650,6 +650,8 @@ inline static QCBORError DecodeBytes(const QCORInternalAllocator *pAllocator,
       goto Done;
    }
 
+   /*avoid initialization crossing with wrapping block*/
+   {
    const UsefulBufC Bytes = UsefulInputBuf_GetUsefulBuf(pUInBuf, (size_t)uStrLen);
    if(UsefulBuf_IsNULLC(Bytes)) {
       // Failed to get the bytes for this string item
@@ -674,7 +676,7 @@ inline static QCBORError DecodeBytes(const QCORInternalAllocator *pAllocator,
    // Cast because ternary operator causes promotion to integer
    pDecodedItem->uDataType = (uint8_t)(bIsBstr ? QCBOR_TYPE_BYTE_STRING
                                                : QCBOR_TYPE_TEXT_STRING);
-
+  }
 Done:
    return nReturn;
 }
@@ -829,75 +831,77 @@ GetNext_FullItem(QCBORDecodeContext *me, QCBORItem *pDecodedItem)
    // code in this function from here down can be eliminated. Run tests, except
    // indefinite length string tests, to be sure all is OK if this is removed.
 
-   // Only do indefinite length processing on strings
-   const uint8_t uStringType = pDecodedItem->uDataType;
-   if(uStringType!= QCBOR_TYPE_BYTE_STRING && uStringType != QCBOR_TYPE_TEXT_STRING) {
-      goto Done; // no need to do any work here on non-string types
+   /*avoid initialization crossing with wrapping block*/
+   {
+     // Only do indefinite length processing on strings
+     const uint8_t uStringType = pDecodedItem->uDataType;
+     if(uStringType!= QCBOR_TYPE_BYTE_STRING && uStringType != QCBOR_TYPE_TEXT_STRING) {
+        goto Done; // no need to do any work here on non-string types
+     }
+
+     // Is this a string with an indefinite length?
+     if(pDecodedItem->val.string.len != SIZE_MAX) {
+        goto Done; // length is not indefinite, so no work to do here
+     }
+
+     // Can't do indefinite length strings without a string allocator
+     if(pAllocator == NULL) {
+        nReturn = QCBOR_ERR_NO_STRING_ALLOCATOR;
+        goto Done;
+     }
+
+     // Loop getting chunk of indefinite string
+     UsefulBufC FullString = NULLUsefulBufC;
+
+     for(;;) {
+        // Get item for next chunk
+        QCBORItem StringChunkItem;
+        // NULL string allocator passed here. Do not need to allocate
+        // chunks even if bStringAllocateAll is set.
+        nReturn = GetNext_Item(&(me->InBuf), &StringChunkItem, NULL);
+        if(nReturn) {
+           break;  // Error getting the next chunk
+        }
+
+        // See if it is a marker at end of indefinite length string
+        if(StringChunkItem.uDataType == QCBOR_TYPE_BREAK) {
+           // String is complete
+           pDecodedItem->val.string = FullString;
+           pDecodedItem->uDataAlloc = 1;
+           break;
+        }
+
+        // Match data type of chunk to type at beginning.
+        // Also catches error of other non-string types that don't belong.
+        // Also catches indefinite length strings inside indefinite length strings
+        if(StringChunkItem.uDataType != uStringType ||
+           StringChunkItem.val.string.len == SIZE_MAX) {
+           nReturn = QCBOR_ERR_INDEFINITE_STRING_CHUNK;
+           break;
+        }
+
+        // Alloc new buffer or expand previously allocated buffer so it can fit
+        // The first time throurgh FullString.ptr is NULL and this is
+        // equivalent to StringAllocator_Allocate()
+        UsefulBuf NewMem = StringAllocator_Reallocate(pAllocator,
+                                                      UNCONST_POINTER(FullString.ptr),
+                                                      FullString.len + StringChunkItem.val.string.len);
+
+        if(UsefulBuf_IsNULL(NewMem)) {
+           // Allocation of memory for the string failed
+           nReturn = QCBOR_ERR_STRING_ALLOCATE;
+           break;
+        }
+
+        // Copy new string chunk at the end of string so far.
+        FullString = UsefulBuf_CopyOffset(NewMem, FullString.len, StringChunkItem.val.string);
+     }
+
+     if(nReturn != QCBOR_SUCCESS && !UsefulBuf_IsNULLC(FullString)) {
+        // Getting the item failed, clean up the allocated memory
+        StringAllocator_Free(pAllocator, UNCONST_POINTER(FullString.ptr));
+     }
    }
-
-   // Is this a string with an indefinite length?
-   if(pDecodedItem->val.string.len != SIZE_MAX) {
-      goto Done; // length is not indefinite, so no work to do here
-   }
-
-   // Can't do indefinite length strings without a string allocator
-   if(pAllocator == NULL) {
-      nReturn = QCBOR_ERR_NO_STRING_ALLOCATOR;
-      goto Done;
-   }
-
-   // Loop getting chunk of indefinite string
-   UsefulBufC FullString = NULLUsefulBufC;
-
-   for(;;) {
-      // Get item for next chunk
-      QCBORItem StringChunkItem;
-      // NULL string allocator passed here. Do not need to allocate
-      // chunks even if bStringAllocateAll is set.
-      nReturn = GetNext_Item(&(me->InBuf), &StringChunkItem, NULL);
-      if(nReturn) {
-         break;  // Error getting the next chunk
-      }
-
-      // See if it is a marker at end of indefinite length string
-      if(StringChunkItem.uDataType == QCBOR_TYPE_BREAK) {
-         // String is complete
-         pDecodedItem->val.string = FullString;
-         pDecodedItem->uDataAlloc = 1;
-         break;
-      }
-
-      // Match data type of chunk to type at beginning.
-      // Also catches error of other non-string types that don't belong.
-      // Also catches indefinite length strings inside indefinite length strings
-      if(StringChunkItem.uDataType != uStringType ||
-         StringChunkItem.val.string.len == SIZE_MAX) {
-         nReturn = QCBOR_ERR_INDEFINITE_STRING_CHUNK;
-         break;
-      }
-
-      // Alloc new buffer or expand previously allocated buffer so it can fit
-      // The first time throurgh FullString.ptr is NULL and this is
-      // equivalent to StringAllocator_Allocate()
-      UsefulBuf NewMem = StringAllocator_Reallocate(pAllocator,
-                                                    UNCONST_POINTER(FullString.ptr),
-                                                    FullString.len + StringChunkItem.val.string.len);
-
-      if(UsefulBuf_IsNULL(NewMem)) {
-         // Allocation of memory for the string failed
-         nReturn = QCBOR_ERR_STRING_ALLOCATE;
-         break;
-      }
-
-      // Copy new string chunk at the end of string so far.
-      FullString = UsefulBuf_CopyOffset(NewMem, FullString.len, StringChunkItem.val.string);
-   }
-
-   if(nReturn != QCBOR_SUCCESS && !UsefulBuf_IsNULLC(FullString)) {
-      // Getting the item failed, clean up the allocated memory
-      StringAllocator_Free(pAllocator, UNCONST_POINTER(FullString.ptr));
-   }
-
 Done:
    return nReturn;
 }
@@ -934,7 +938,8 @@ GetNext_TaggedItem(QCBORDecodeContext *me,
 
       uint8_t uTagBitIndex;
       // Tag was mapped, tag was not mapped, error with tag list
-      switch(TagMapper_Lookup(me->pCallerConfiguredTagList, pDecodedItem->val.uTagV, &uTagBitIndex)) {
+   /*explicit casting added*/
+    switch(TagMapper_Lookup((const QCBORTagListIn *)me->pCallerConfiguredTagList, pDecodedItem->val.uTagV, &uTagBitIndex)) {
 
          case QCBOR_SUCCESS:
             // Successfully mapped the tag
@@ -1285,78 +1290,80 @@ QCBORDecode_MantissaAndExponent(QCBORDecodeContext *me, QCBORItem *pDecodedItem)
       goto Done;
    }
 
-   // A check for pDecodedItem->val.uCount == 2 would work for
-   // definite length arrays, but not for indefnite.  Instead remember
-   // the nesting level the two integers must be at, which is one
-   // deeper than that of the array.
-   const int nNestLevel = pDecodedItem->uNestingLevel + 1;
+   /*avoid initialization crossing with wrapping block*/
+   {
+     // A check for pDecodedItem->val.uCount == 2 would work for
+     // definite length arrays, but not for indefnite.  Instead remember
+     // the nesting level the two integers must be at, which is one
+     // deeper than that of the array.
+     const int nNestLevel = pDecodedItem->uNestingLevel + 1;
 
-   // --- Is it a decimal fraction or a bigfloat? ---
-   const bool bIsTaggedDecimalFraction = QCBORDecode_IsTagged(me, pDecodedItem, CBOR_TAG_DECIMAL_FRACTION);
-   pDecodedItem->uDataType = bIsTaggedDecimalFraction ? QCBOR_TYPE_DECIMAL_FRACTION : QCBOR_TYPE_BIGFLOAT;
+     // --- Is it a decimal fraction or a bigfloat? ---
+     const bool bIsTaggedDecimalFraction = QCBORDecode_IsTagged(me, pDecodedItem, CBOR_TAG_DECIMAL_FRACTION);
+     pDecodedItem->uDataType = bIsTaggedDecimalFraction ? QCBOR_TYPE_DECIMAL_FRACTION : QCBOR_TYPE_BIGFLOAT;
 
-   // --- Get the exponent ---
-   QCBORItem exponentItem;
-   nReturn = QCBORDecode_GetNextMapOrArray(me, &exponentItem, NULL);
-   if(nReturn != QCBOR_SUCCESS) {
-      goto Done;
-   }
-   if(exponentItem.uNestingLevel != nNestLevel) {
-      // Array is empty or a map/array encountered when expecting an int
-      nReturn = QCBOR_ERR_BAD_EXP_AND_MANTISSA;
-      goto Done;
-   }
-   if(exponentItem.uDataType == QCBOR_TYPE_INT64) {
-     // Data arriving as an unsigned int < INT64_MAX has been converted
-     // to QCBOR_TYPE_INT64 and thus handled here. This is also means
-     // that the only data arriving here of type QCBOR_TYPE_UINT64 data
-     // will be too large for this to handle and thus an error that will
-     // get handled in the next else.
-     pDecodedItem->val.expAndMantissa.nExponent = exponentItem.val.int64;
-   } else {
-      // Wrong type of exponent or a QCBOR_TYPE_UINT64 > INT64_MAX
-      nReturn = QCBOR_ERR_BAD_EXP_AND_MANTISSA;
-      goto Done;
-   }
+     // --- Get the exponent ---
+     QCBORItem exponentItem;
+     nReturn = QCBORDecode_GetNextMapOrArray(me, &exponentItem, NULL);
+     if(nReturn != QCBOR_SUCCESS) {
+        goto Done;
+     }
+     if(exponentItem.uNestingLevel != nNestLevel) {
+        // Array is empty or a map/array encountered when expecting an int
+        nReturn = QCBOR_ERR_BAD_EXP_AND_MANTISSA;
+        goto Done;
+     }
+     if(exponentItem.uDataType == QCBOR_TYPE_INT64) {
+       // Data arriving as an unsigned int < INT64_MAX has been converted
+       // to QCBOR_TYPE_INT64 and thus handled here. This is also means
+       // that the only data arriving here of type QCBOR_TYPE_UINT64 data
+       // will be too large for this to handle and thus an error that will
+       // get handled in the next else.
+       pDecodedItem->val.expAndMantissa.nExponent = exponentItem.val.int64;
+     } else {
+        // Wrong type of exponent or a QCBOR_TYPE_UINT64 > INT64_MAX
+        nReturn = QCBOR_ERR_BAD_EXP_AND_MANTISSA;
+        goto Done;
+     }
 
-   // --- Get the mantissa ---
-   QCBORItem mantissaItem;
-   nReturn = QCBORDecode_GetNextWithTags(me, &mantissaItem, NULL);
-   if(nReturn != QCBOR_SUCCESS) {
-      goto Done;
-   }
-   if(mantissaItem.uNestingLevel != nNestLevel) {
-      // Mantissa missing or map/array encountered when expecting number
-      nReturn = QCBOR_ERR_BAD_EXP_AND_MANTISSA;
-      goto Done;
-   }
-   if(mantissaItem.uDataType == QCBOR_TYPE_INT64) {
-      // Data arriving as an unsigned int < INT64_MAX has been converted
-      // to QCBOR_TYPE_INT64 and thus handled here. This is also means
-      // that the only data arriving here of type QCBOR_TYPE_UINT64 data
-      // will be too large for this to handle and thus an error that
-      // will get handled in an else below.
-      pDecodedItem->val.expAndMantissa.Mantissa.nInt = mantissaItem.val.int64;
-   }  else if(mantissaItem.uDataType == QCBOR_TYPE_POSBIGNUM || mantissaItem.uDataType == QCBOR_TYPE_NEGBIGNUM) {
-      // Got a good big num mantissa
-      pDecodedItem->val.expAndMantissa.Mantissa.bigNum = mantissaItem.val.bigNum;
-      // Depends on numbering of QCBOR_TYPE_XXX
-      pDecodedItem->uDataType = (uint8_t)(pDecodedItem->uDataType +
-                                          mantissaItem.uDataType - QCBOR_TYPE_POSBIGNUM +
-                                          1);
-   } else {
-      // Wrong type of mantissa or a QCBOR_TYPE_UINT64 > INT64_MAX
-      nReturn = QCBOR_ERR_BAD_EXP_AND_MANTISSA;
-      goto Done;
-   }
+     // --- Get the mantissa ---
+     QCBORItem mantissaItem;
+     nReturn = QCBORDecode_GetNextWithTags(me, &mantissaItem, NULL);
+     if(nReturn != QCBOR_SUCCESS) {
+        goto Done;
+     }
+     if(mantissaItem.uNestingLevel != nNestLevel) {
+        // Mantissa missing or map/array encountered when expecting number
+        nReturn = QCBOR_ERR_BAD_EXP_AND_MANTISSA;
+        goto Done;
+     }
+     if(mantissaItem.uDataType == QCBOR_TYPE_INT64) {
+        // Data arriving as an unsigned int < INT64_MAX has been converted
+        // to QCBOR_TYPE_INT64 and thus handled here. This is also means
+        // that the only data arriving here of type QCBOR_TYPE_UINT64 data
+        // will be too large for this to handle and thus an error that
+        // will get handled in an else below.
+        pDecodedItem->val.expAndMantissa.Mantissa.nInt = mantissaItem.val.int64;
+     }  else if(mantissaItem.uDataType == QCBOR_TYPE_POSBIGNUM || mantissaItem.uDataType == QCBOR_TYPE_NEGBIGNUM) {
+        // Got a good big num mantissa
+        pDecodedItem->val.expAndMantissa.Mantissa.bigNum = mantissaItem.val.bigNum;
+        // Depends on numbering of QCBOR_TYPE_XXX
+        pDecodedItem->uDataType = (uint8_t)(pDecodedItem->uDataType +
+                                            mantissaItem.uDataType - QCBOR_TYPE_POSBIGNUM +
+                                            1);
+     } else {
+        // Wrong type of mantissa or a QCBOR_TYPE_UINT64 > INT64_MAX
+        nReturn = QCBOR_ERR_BAD_EXP_AND_MANTISSA;
+        goto Done;
+     }
 
-   // --- Check that array only has the two numbers ---
-   if(mantissaItem.uNextNestLevel == nNestLevel) {
-      // Extra items in the decimal fraction / big num
-      nReturn = QCBOR_ERR_BAD_EXP_AND_MANTISSA;
-      goto Done;
+     // --- Check that array only has the two numbers ---
+     if(mantissaItem.uNextNestLevel == nNestLevel) {
+        // Extra items in the decimal fraction / big num
+        nReturn = QCBOR_ERR_BAD_EXP_AND_MANTISSA;
+        goto Done;
+     }
    }
-
 Done:
 
   return nReturn;
@@ -1491,7 +1498,8 @@ int QCBORDecode_IsTagged(QCBORDecodeContext *me,
                          const QCBORItem *pItem,
                          uint64_t uTag)
 {
-   const QCBORTagListIn *pCallerConfiguredTagMap = me->pCallerConfiguredTagList;
+   /*explicit casting added*/
+  const QCBORTagListIn *pCallerConfiguredTagMap = (const QCBORTagListIn *)me->pCallerConfiguredTagList;
 
    uint8_t uTagBitIndex;
    // Do not care about errors in pCallerConfiguredTagMap here. They are
@@ -1644,69 +1652,73 @@ MemPool_Function(void *pPool, void *pMem, size_t uNewSize)
       // optimize out if sizeof(size_t) == sizeof(uint32_t)
       goto Done;
    }
-   const uint32_t uNewSize32 = (uint32_t)uNewSize;
 
-   if(MemPool_Unpack(pPool, &uPoolSize, &uFreeOffset)) {
-      goto Done;
+   /*avoid initialization crossing with wrapping block*/
+   {
+     const uint32_t uNewSize32 = (uint32_t)uNewSize;
+
+     if(MemPool_Unpack(pPool, &uPoolSize, &uFreeOffset)) {
+        goto Done;
+     }
+
+     if(uNewSize) {
+        if(pMem) {
+           // REALLOCATION MODE
+           // Calculate pointer to the end of the memory pool.  It is
+           // assumed that pPool + uPoolSize won't wrap around by
+           // assuming the caller won't pass a pool buffer in that is
+           // not in legitimate memory space.
+           const void *pPoolEnd = (uint8_t *)pPool + uPoolSize;
+
+           // Check that the pointer for reallocation is in the range of the
+           // pool. This also makes sure that pointer math further down
+           // doesn't wrap under or over.
+           if(pMem >= pPool && pMem < pPoolEnd) {
+              // Offset to start of chunk for reallocation. This won't
+              // wrap under because of check that pMem >= pPool.  Cast
+              // is safe because the pool is always less than UINT32_MAX
+              // because of check in QCBORDecode_SetMemPool().
+              const uint32_t uMemOffset = (uint32_t)((uint8_t *)pMem - (uint8_t *)pPool);
+
+              // Check to see if the allocation will fit. uPoolSize -
+              // uMemOffset will not wrap under because of check that
+              // pMem is in the range of the uPoolSize by check above.
+              if(uNewSize <= uPoolSize - uMemOffset) {
+                 ReturnValue.ptr = pMem;
+                 ReturnValue.len = uNewSize;
+
+                 // Addition won't wrap around over because uNewSize was
+                 // checked to be sure it is less than the pool size.
+                 uFreeOffset = uMemOffset + uNewSize32;
+              }
+           }
+        } else {
+           // ALLOCATION MODE
+           // uPoolSize - uFreeOffset will not underflow because this
+           // pool implementation makes sure uFreeOffset is always
+           // smaller than uPoolSize through this check here and
+           // reallocation case.
+           if(uNewSize <= uPoolSize - uFreeOffset) {
+              ReturnValue.len = uNewSize;
+              ReturnValue.ptr = (uint8_t *)pPool + uFreeOffset;
+              uFreeOffset    += (uint32_t)uNewSize;
+           }
+        }
+     } else {
+        if(pMem) {
+           // FREE MODE
+           // Cast is safe because of limit on pool size in
+           // QCBORDecode_SetMemPool()
+           uFreeOffset = (uint32_t)((uint8_t *)pMem - (uint8_t *)pPool);
+        } else {
+           // DESTRUCT MODE
+           // Nothing to do for this allocator
+        }
+     }
+
+     UsefulBuf Pool = {pPool, uPoolSize};
+     MemPool_Pack(Pool, uFreeOffset);
    }
-
-   if(uNewSize) {
-      if(pMem) {
-         // REALLOCATION MODE
-         // Calculate pointer to the end of the memory pool.  It is
-         // assumed that pPool + uPoolSize won't wrap around by
-         // assuming the caller won't pass a pool buffer in that is
-         // not in legitimate memory space.
-         const void *pPoolEnd = (uint8_t *)pPool + uPoolSize;
-
-         // Check that the pointer for reallocation is in the range of the
-         // pool. This also makes sure that pointer math further down
-         // doesn't wrap under or over.
-         if(pMem >= pPool && pMem < pPoolEnd) {
-            // Offset to start of chunk for reallocation. This won't
-            // wrap under because of check that pMem >= pPool.  Cast
-            // is safe because the pool is always less than UINT32_MAX
-            // because of check in QCBORDecode_SetMemPool().
-            const uint32_t uMemOffset = (uint32_t)((uint8_t *)pMem - (uint8_t *)pPool);
-
-            // Check to see if the allocation will fit. uPoolSize -
-            // uMemOffset will not wrap under because of check that
-            // pMem is in the range of the uPoolSize by check above.
-            if(uNewSize <= uPoolSize - uMemOffset) {
-               ReturnValue.ptr = pMem;
-               ReturnValue.len = uNewSize;
-
-               // Addition won't wrap around over because uNewSize was
-               // checked to be sure it is less than the pool size.
-               uFreeOffset = uMemOffset + uNewSize32;
-            }
-         }
-      } else {
-         // ALLOCATION MODE
-         // uPoolSize - uFreeOffset will not underflow because this
-         // pool implementation makes sure uFreeOffset is always
-         // smaller than uPoolSize through this check here and
-         // reallocation case.
-         if(uNewSize <= uPoolSize - uFreeOffset) {
-            ReturnValue.len = uNewSize;
-            ReturnValue.ptr = (uint8_t *)pPool + uFreeOffset;
-            uFreeOffset    += (uint32_t)uNewSize;
-         }
-      }
-   } else {
-      if(pMem) {
-         // FREE MODE
-         // Cast is safe because of limit on pool size in
-         // QCBORDecode_SetMemPool()
-         uFreeOffset = (uint32_t)((uint8_t *)pMem - (uint8_t *)pPool);
-      } else {
-         // DESTRUCT MODE
-         // Nothing to do for this allocator
-      }
-   }
-
-   UsefulBuf Pool = {pPool, uPoolSize};
-   MemPool_Pack(Pool, uFreeOffset);
 
 Done:
    return ReturnValue;

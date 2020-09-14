@@ -56,43 +56,45 @@ const char * UOBTest_NonAdversarial()
       goto Done;
    }
 
-   // Put 7 bytes at beginning of buf
-   UsefulOutBuf_AppendData(&UOB, "bluster", 7);
+   /*avoid initialization crossing with wrapping block*/
+   {
+     // Put 7 bytes at beginning of buf
+     UsefulOutBuf_AppendData(&UOB, "bluster", 7);
 
-   if(UsefulOutBuf_AtStart(&UOB)) {
-      szReturn = "At start";
-      goto Done;
+     if(UsefulOutBuf_AtStart(&UOB)) {
+        szReturn = "At start";
+        goto Done;
+     }
+
+     // add a space to end
+     UsefulOutBuf_AppendByte(&UOB, ' ');
+
+     // Add 5 bytes to the end
+     UsefulBufC UBC = {"hunny", 5};
+     UsefulOutBuf_AppendUsefulBuf(&UOB, UBC);
+
+     // Insert 9 bytes at the beginning, slide the previous stuff right
+     UsefulOutBuf_InsertData(&UOB, "heffalump", 9, 0);
+     UsefulOutBuf_InsertByte(&UOB, ' ', 9);
+
+     // Put 9 bytes in at position 10 -- just after "heffalump "
+     UsefulBufC UBC2 = {"unbounce ", 9};
+     UsefulOutBuf_InsertUsefulBuf(&UOB, UBC2, 10);
+
+
+     const UsefulBufC Expected = UsefulBuf_FROM_SZ_LITERAL("heffalump unbounce bluster hunny");
+
+     UsefulBufC U = UsefulOutBuf_OutUBuf(&UOB);
+     if(UsefulBuf_IsNULLC(U) || UsefulBuf_Compare(Expected, U) || UsefulOutBuf_GetError(&UOB)) {
+        szReturn = "OutUBuf";
+     }
+
+     UsefulBuf_MAKE_STACK_UB(buf, 50);
+     UsefulBufC Out =  UsefulOutBuf_CopyOut(&UOB, buf);
+     if(UsefulBuf_IsNULLC(Out) || UsefulBuf_Compare(Expected, Out)) {
+        szReturn = "CopyOut";
+     }
    }
-
-   // add a space to end
-   UsefulOutBuf_AppendByte(&UOB, ' ');
-
-   // Add 5 bytes to the end
-   UsefulBufC UBC = {"hunny", 5};
-   UsefulOutBuf_AppendUsefulBuf(&UOB, UBC);
-
-   // Insert 9 bytes at the beginning, slide the previous stuff right
-   UsefulOutBuf_InsertData(&UOB, "heffalump", 9, 0);
-   UsefulOutBuf_InsertByte(&UOB, ' ', 9);
-
-   // Put 9 bytes in at position 10 -- just after "heffalump "
-   UsefulBufC UBC2 = {"unbounce ", 9};
-   UsefulOutBuf_InsertUsefulBuf(&UOB, UBC2, 10);
-
-
-   const UsefulBufC Expected = UsefulBuf_FROM_SZ_LITERAL("heffalump unbounce bluster hunny");
-
-   UsefulBufC U = UsefulOutBuf_OutUBuf(&UOB);
-   if(UsefulBuf_IsNULLC(U) || UsefulBuf_Compare(Expected, U) || UsefulOutBuf_GetError(&UOB)) {
-      szReturn = "OutUBuf";
-   }
-
-   UsefulBuf_MAKE_STACK_UB(buf, 50);
-   UsefulBufC Out =  UsefulOutBuf_CopyOut(&UOB, buf);
-   if(UsefulBuf_IsNULLC(Out) || UsefulBuf_Compare(Expected, Out)) {
-      szReturn = "CopyOut";
-   }
-
 Done:
    return szReturn;
 }
@@ -295,19 +297,20 @@ const char *TestBasicSanity()
 
 const char *UBMacroConversionsTest()
 {
-   char *szFoo = "foo";
+   /*explicit castings added*/
+   char *szFoo = (char *)"foo";
 
    UsefulBufC Foo = UsefulBuf_FromSZ(szFoo);
-   if(Foo.len != 3 || strncmp(Foo.ptr, szFoo, 3))
+   if(Foo.len != 3 || strncmp((const char *)Foo.ptr, szFoo, 3))
       return "SZToUsefulBufC failed";
 
    UsefulBufC Too = UsefulBuf_FROM_SZ_LITERAL("Toooo");
-   if(Too.len != 5 || strncmp(Too.ptr, "Toooo", 5))
+   if(Too.len != 5 || strncmp((const char *)Too.ptr, "Toooo", 5))
       return "UsefulBuf_FROM_SZ_LITERAL failed";
 
    uint8_t pB[] = {0x42, 0x6f, 0x6f};
    UsefulBufC Boo = UsefulBuf_FROM_BYTE_ARRAY_LITERAL(pB);
-   if(Boo.len != 3 || strncmp(Boo.ptr, "Boo", 3))
+   if(Boo.len != 3 || strncmp((const char *)Boo.ptr, "Boo", 3))
      return "UsefulBuf_FROM_BYTE_ARRAY_LITERAL failed";
 
    UsefulBuf B = (UsefulBuf){(void *)Too.ptr, Too.len};
@@ -353,8 +356,8 @@ const char *UBUtilTests()
    if(!UsefulBuf_IsEmpty(UB2)) {
       return "Back to UB is Empty failed";
    }
-
-   UB.ptr = "x"; // just some valid pointer
+   /*explicit casting added*/
+   UB.ptr = (void *) "x"; // just some valid pointer
 
    if(UsefulBuf_IsNULL(UB)){
       return "IsNull failed";
@@ -556,11 +559,13 @@ const char *UBUtilTests()
       return "IsValue failed on NULLUsefulBufC";
    }
 
-   if(UsefulBuf_IsValue((UsefulBufC){(uint8_t[]){0x00}, 1}, 0x00) != SIZE_MAX) {
+   /*GCC: error: taking address of temporary array. adding const to array definition*/
+   if(UsefulBuf_IsValue((UsefulBufC){(const uint8_t[]){0x00}, 1}, 0x00) != SIZE_MAX) {
       return "IsValue failed finding 0 in one byte of 0";
    }
-
-   if(UsefulBuf_IsValue((UsefulBufC){(uint8_t[]){0x00}, 1}, 0x01) != 0) {
+   
+   /*GCC: error: taking address of temporary array. adding const to array definition*/
+   if(UsefulBuf_IsValue((UsefulBufC){(const uint8_t[]){0x00}, 1}, 0x01) != 0) {
       return "IsValue failed not finding 1 in one byte of 0";
    }
 

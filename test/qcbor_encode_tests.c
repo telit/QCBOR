@@ -543,7 +543,8 @@ int32_t AllAddMethodsTest()
    QCBOREncode_CloseMap(&ECtx);
 
    // Epoch Date
-   QCBOREncode_AddDateEpoch(&ECtx, 2383748234);
+   /*decimal constant is unsigned only in ISO C90, add explicit type in constant (long long)*/
+   QCBOREncode_AddDateEpoch(&ECtx, 2383748234ll);
 
    // Epoch date with labels
    QCBOREncode_OpenMap(&ECtx);
@@ -553,15 +554,17 @@ int32_t AllAddMethodsTest()
    QCBOREncode_CloseMap(&ECtx);
 
    // Binary blobs
-   QCBOREncode_AddBytes(&ECtx, ((UsefulBufC) {(uint8_t []){0xff, 0x00}, 2}));
+   /*GCC: error: taking address of temporary array. adding const to array definition*/
+   QCBOREncode_AddBytes(&ECtx, ((UsefulBufC) {(const uint8_t []){0xff, 0x00}, 2}));
 
    // binary blobs in maps
    QCBOREncode_OpenMap(&ECtx);
    QCBOREncode_AddSZString(&ECtx, "binbin");
    QCBOREncode_AddTag(&ECtx, 100000);
-   QCBOREncode_AddBytes(&ECtx, ((UsefulBufC) {(uint8_t []){0x00}, 1}));
-   QCBOREncode_AddBytesToMap(&ECtx, "blabel", ((UsefulBufC) {(uint8_t []){0x01, 0x02, 0x03}, 3}));
-   QCBOREncode_AddBytesToMapN(&ECtx, 0, ((UsefulBufC){(uint8_t []){0x04, 0x02, 0x03, 0xfe}, 4}));
+   /*GCC: error: taking address of temporary array. adding const to array definition*/
+   QCBOREncode_AddBytes(&ECtx, ((UsefulBufC) {(const uint8_t []){0x00}, 1}));
+   QCBOREncode_AddBytesToMap(&ECtx, "blabel", ((UsefulBufC) {(const uint8_t []){0x01, 0x02, 0x03}, 3}));
+   QCBOREncode_AddBytesToMapN(&ECtx, 0, ((UsefulBufC){(const uint8_t []){0x04, 0x02, 0x03, 0xfe}, 4}));
    QCBOREncode_CloseMap(&ECtx);
 
    // text blobs
@@ -803,10 +806,11 @@ int32_t IntegerValuesTest1()
    QCBOREncode_AddInt64(&ECtx, -9223372036854775807LL - 1);
    QCBOREncode_AddInt64(&ECtx, -4294967297);
    QCBOREncode_AddInt64(&ECtx, -4294967296);
-   QCBOREncode_AddInt64(&ECtx, -4294967295);
-   QCBOREncode_AddInt64(&ECtx, -4294967294);
-   QCBOREncode_AddInt64(&ECtx, -2147483648);
-   QCBOREncode_AddInt64(&ECtx, -2147483647);
+   /*decimal constant is unsigned only in ISO C90, add explicit type in constant (long long)*/
+   QCBOREncode_AddInt64(&ECtx, -4294967295ll);
+   QCBOREncode_AddInt64(&ECtx, -4294967294ll);
+   QCBOREncode_AddInt64(&ECtx, -2147483648ll);
+   QCBOREncode_AddInt64(&ECtx, -2147483647ll);
    QCBOREncode_AddInt64(&ECtx, -65538);
    QCBOREncode_AddInt64(&ECtx, -65537);
    QCBOREncode_AddInt64(&ECtx, -65536);
@@ -840,12 +844,14 @@ int32_t IntegerValuesTest1()
    QCBOREncode_AddInt64(&ECtx, 65538);
    QCBOREncode_AddInt64(&ECtx, 2147483647);
    QCBOREncode_AddInt64(&ECtx, 2147483647);
-   QCBOREncode_AddInt64(&ECtx, 2147483648);
-   QCBOREncode_AddInt64(&ECtx, 2147483649);
-   QCBOREncode_AddInt64(&ECtx, 4294967294);
-   QCBOREncode_AddInt64(&ECtx, 4294967295);
-   QCBOREncode_AddInt64(&ECtx, 4294967296);
-   QCBOREncode_AddInt64(&ECtx, 4294967297);
+
+   /*decimal constant is unsigned only in ISO C90, add explicit type in constant (long long)*/
+   QCBOREncode_AddInt64(&ECtx, 2147483648ll);
+   QCBOREncode_AddInt64(&ECtx, 2147483649ll);
+   QCBOREncode_AddInt64(&ECtx, 4294967294ll);
+   QCBOREncode_AddInt64(&ECtx, 4294967295ll);
+   QCBOREncode_AddInt64(&ECtx, 4294967296ll);
+   QCBOREncode_AddInt64(&ECtx, 4294967297ll);
    QCBOREncode_AddInt64(&ECtx, 9223372036854775807LL);
    QCBOREncode_AddUInt64(&ECtx, 18446744073709551615ULL);
 
@@ -1715,7 +1721,7 @@ static const uint8_t spExpectedTypeAndLen[] = {0x81, 0x58, 0x25};
 /*
  Very basic bstr wrapping test
  */
-int BstrWrapTest()
+int32_t BstrWrapTest(void)
 {
    QCBOREncodeContext EC;
 

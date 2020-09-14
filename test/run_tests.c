@@ -156,8 +156,8 @@ static const char *NumToString(int32_t nNum, UsefulBuf StringMem)
       UsefulOutBuf_AppendByte(&OutBuf, '0');
    }
    UsefulOutBuf_AppendByte(&OutBuf, '\0');
-
-   return UsefulOutBuf_GetError(&OutBuf) ? "" : StringMem.ptr;
+   /*explicit casting added*/
+   return UsefulOutBuf_GetError(&OutBuf) ? "" : (const char *)StringMem.ptr;
 }
 
 
